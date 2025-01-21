@@ -6,7 +6,7 @@ namespace AuthorizationAPI.Database
     {
         public string? Name { get; set; }
         public bool IsStudent { get; set; }
-        public bool IsTeacher { get; set; }
 
+        public bool IsTeacher { get; set; }
     }
 }
