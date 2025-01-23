@@ -81,13 +81,6 @@ app.MapIdentityApi<User>();
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
-    var context = services.GetRequiredService<AppDbContext>();
-    context.Database.Migrate();
-}
-
-using (var scope = app.Services.CreateScope())
-{
-    var services = scope.ServiceProvider;
     var dbContext = services.GetRequiredService<AppDbContext>();
     var userManager = services.GetRequiredService<UserManager<User>>();
     var roleManager = services.GetRequiredService<RoleManager<IdentityRole>>();
@@ -97,7 +90,6 @@ using (var scope = app.Services.CreateScope())
     //create admin account if there are no users
     if (!dbContext.Users.Any())
     {
-
         var admin = new User
         {
             UserName = "admin@wp.pl",
@@ -108,7 +100,7 @@ using (var scope = app.Services.CreateScope())
         var result = await userManager.CreateAsync(admin, "qwerty");
 
         //throw exception if failed
-        if(result.Succeeded == false)
+        if (result.Succeeded == false)
         {
             throw new Exception("Cannot create admin account");
         }
@@ -126,6 +118,17 @@ using (var scope = app.Services.CreateScope())
         await dbContext.SaveChangesAsync();
     }
 }
+
+
+//missing claims and roles endpoint
+app.MapGet("manage/rolesAndClaims", (ClaimsPrincipal user) => {
+    return Results.Ok(new
+    {
+        Roles = user.FindAll(ClaimTypes.Role).Select(claim => claim.Value),
+        Claims = user.Claims.ToDictionary(claim => claim.Type, claim => claim.Value)
+    });
+}).RequireAuthorization();
+
 
 app.MapGet("students/me", async (ClaimsPrincipal claims, AppDbContext context) =>
     {
