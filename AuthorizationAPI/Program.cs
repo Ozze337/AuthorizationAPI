@@ -197,6 +197,28 @@ app.MapPost("/assign-role", async (string userId, string role, UserManager<User>
     return Results.BadRequest("Failed to assign role");
 })
 .RequireAuthorization("RequireAdminRole");
+app.MapPost("/remove-role", async (string userId, string role, UserManager<User> userManager, RoleManager<IdentityRole> roleManager) =>
+{
+    var user = await userManager.FindByIdAsync(userId);
+    if (user == null)
+    {
+        return Results.NotFound("User not found");
+    }
+
+    if (!await roleManager.RoleExistsAsync(role))
+    {
+        return Results.BadRequest("Role does not exist");
+    }
+
+    var result = await userManager.RemoveFromRoleAsync(user, role);
+    if (result.Succeeded)
+    {
+        return Results.Ok("Role removed successfully");
+    }
+
+    return Results.BadRequest("Failed to remove role");
+})
+.RequireAuthorization("RequireAdminRole");
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
