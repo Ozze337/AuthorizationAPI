@@ -1,13 +1,10 @@
-﻿namespace AuthorizationAPI.Database
+﻿using AuthorizationAPI.Database;
+
+public class Class
 {
-    public class Class
-    {
-        public string? Name { get; set; }
-        public string? Description { get; set; }
-    }
-    public class CreateClass
-    {
-        public string? Name { get; set; }
-        public string? Description { get; set; }
-    }
+    public int Id { get; set; }
+    public string? Name { get; set; }
+    public string? Description { get; set; }
+    public string? TeacherId { get; set; }
+    public Teacher? Teacher { get; set; }
 }
