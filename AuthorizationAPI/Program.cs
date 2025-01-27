@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+
 builder.Services.Configure<IdentityOptions>(options =>
 {
     // Password settings.
@@ -125,30 +126,6 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-app.MapGet("students/me", async (ClaimsPrincipal claims, AppDbContext context) =>
-{
-    var userId = claims.Claims.First(c => c.Type == ClaimTypes.NameIdentifier).Value;
-    return await context.Students.FindAsync(userId);
-})
-    .RequireAuthorization("RequireStudentRole");
-
-app.MapGet("teachers/me", async (ClaimsPrincipal claims, AppDbContext context) =>
-{
-    var userId = claims.Claims.First(c => c.Type == ClaimTypes.NameIdentifier).Value;
-    return await context.Teachers.FindAsync(userId);
-})
-    .RequireAuthorization("RequireTeacherRole");
-
-app.MapGet("admins/me", (ClaimsPrincipal user, AppDbContext context) =>
-{
-    var userId = user.Claims.First(c => c.Type == ClaimTypes.NameIdentifier).Value;
-    var name = user.Identity!.Name!;
-    //get user from db
-    var userFromDb = context.Users.Find(userId);
-    return userFromDb;
-})
-    .RequireAuthorization("RequireAdminRole");
-
 app.MapGet("/me", async (ClaimsPrincipal claims, AppDbContext context) =>
 {
     var userId = claims.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
@@ -158,22 +135,7 @@ app.MapGet("/me", async (ClaimsPrincipal claims, AppDbContext context) =>
     }
     var user = await context.Users.FindAsync(userId);
 
-    if (await context.Students.AnyAsync(s => s.Id == userId))
-    {
-        return await context.Students.FindAsync(userId);
-    }
-    else if (await context.Teachers.AnyAsync(t => t.Id == userId))
-    {
-        return await context.Teachers.FindAsync(userId);
-    }
-    else if (await context.Admins.AnyAsync(a => a.Id == userId))
-    {
-        return await context.Admins.FindAsync(userId);
-    }
-    else
-    {
-        return user;
-    }
+    return user;
 });
 var allowedRoles = new List<string> { "Admin", "Teacher", "Student" };
 using (var scope = app.Services.CreateScope())
@@ -250,34 +212,33 @@ app.MapPost("/remove-role", async (string email, string role, UserManager<User> 
 app.MapPost("/classes", async (ClaimsPrincipal claims, AppDbContext context, string name, string description) =>
 {
 
-    
+
     if (string.IsNullOrWhiteSpace(description))
     {
         return Results.BadRequest("Description is required.");
     }
 
-    
+
     var userId = claims.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
     if (string.IsNullOrEmpty(userId))
     {
         return Results.BadRequest("User ID is not found in the claims.");
     }
 
-    
-    var teacher = await context.Teachers.FirstOrDefaultAsync(t => t.Id == userId);
+    var teacher = await context.Users.FindAsync(userId);
     if (teacher == null)
     {
-        return Results.BadRequest("User has the Teacher role but is not registered as a Teacher in the database.");
+        return Results.BadRequest("Teacher not found.");
     }
 
-    
     var newClass = new Class
     {
         Name = name,
-        Description = description
+        Description = description,
+        Teacher = teacher
     };
 
-    
+
     context.Classes.Add(newClass);
     await context.SaveChangesAsync();
 
@@ -292,20 +253,135 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.MapGet("users/me", async (ClaimsPrincipal claims, AppDbContext context) =>
+app.MapGet("users/me", async (ClaimsPrincipal claims, AppDbContext context, UserManager<User> userManager) =>
 {
-    var userId = claims.Claims.First(c => c.Type == ClaimTypes.NameIdentifier).Value;
-    return await context.Users.FindAsync(userId);
+    var userId = claims.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+    if (userId == null)
+    {
+        return Results.BadRequest("User ID is not found in the claims.");
+    }
+
+    var user = await context.Users.Include(u => u.Class).ThenInclude(c => c.Students).FirstOrDefaultAsync(u => u.Id == userId);
+
+    if (user == null)
+    {
+        return Results.NotFound("User not found");
+    }
+
+    var roles = await userManager.GetRolesAsync(user);
+
+    if (roles.Contains("Student"))
+    {
+        return Results.Ok(new
+        {
+            User = user,
+            Class = user.Class != null ? new { user.Class.Id, user.Class.Name, user.Class.Description } : null
+        });
+    }
+    else if (roles.Contains("Teacher"))
+    {
+        return Results.Ok(new
+        {
+            User = user,
+            Class = user.Class != null ? new
+            {
+                user.Class.Id,
+                user.Class.Name,
+                user.Class.Description,
+                Students = user.Class.Students.Select(s => new { s.Id, s.UserName, s.Email })
+            } : null
+        });
+    }
+
+    return Results.Ok(user);
 })
 .RequireAuthorization();
+app.MapPost("/classes/{className}/add-student", async (ClaimsPrincipal claims, string className, string studentEmail, AppDbContext context, UserManager<User> userManager) =>
+{
+    // Retrieve the user ID from claims
+    var userId = claims.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+    if (string.IsNullOrEmpty(userId))
+    {
+        return Results.BadRequest("User ID is not found in the claims.");
+    }
 
-app.MapGet("manage/rolesAndClaims", (ClaimsPrincipal user) => {
+    // sprawdza czy user ma role teacher lub admin
+    var user = await userManager.FindByIdAsync(userId);
+    if (user == null)
+    {
+        return Results.NotFound("User not found");
+    }
+
+    var roles = await userManager.GetRolesAsync(user);
+    if (!roles.Contains("Teacher") && !roles.Contains("Admin"))
+    {
+        return Results.Forbid();
+    }
+
+    //znajdz klase
+    var classEntity = await context.Classes.Include(c => c.Students).FirstOrDefaultAsync(c => c.Name == className);
+    if (classEntity == null)
+    {
+        return Results.NotFound("Class not found");
+    }
+
+    // znajdz ucznia
+    var student = await userManager.FindByEmailAsync(studentEmail);
+    if (student == null)
+    {
+        return Results.NotFound("Student not found");
+    }
+
+    classEntity.Students.Add(student);
+    await context.SaveChangesAsync();
+
+    return Results.Ok("Student added to class successfully");
+})
+.RequireAuthorization(policy => policy.RequireRole("Teacher", "Admin"));
+
+app.MapGet("manage/rolesAndClaims", (ClaimsPrincipal user) =>
+{
     return Results.Ok(new
     {
         Roles = user.FindAll(ClaimTypes.Role).Select(claim => claim.Value),
         Claims = user.Claims.ToDictionary(claim => claim.Type, claim => claim.Value)
     });
 }).RequireAuthorization();
+
+app.MapGet("/get-class", async (AppDbContext context) =>
+{
+    var classes = await context.Classes
+        .Include(c => c.Teacher)
+        .Include(c => c.Students)
+        .ToListAsync();
+
+    return Results.Ok(classes.Select(c => new
+    {
+        c.Id,
+        c.Name,
+        c.Description,
+        Teacher = new { c.Teacher.Id, c.Teacher.UserName, c.Teacher.Email },
+        Students = c.Students.Select(s => new { s.Id, s.UserName, s.Email })
+    }));
+})
+.RequireAuthorization("RequireAdminRole");
+
+app.MapDelete("/delete-class/{className}", async (int classId, AppDbContext context) =>
+{
+    var classEntity = await context.Classes.FindAsync(classId);
+    if (classEntity == null)
+    {
+        return Results.NotFound("Class not found");
+    }
+
+    context.Classes.Remove(classEntity);
+    await context.SaveChangesAsync();
+
+    return Results.Ok("Class deleted successfully");
+})
+.RequireAuthorization(policy => policy.RequireRole("Teacher", "Admin"));
+
+
 app.UseHttpsRedirection();
 
 

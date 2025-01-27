@@ -31,14 +31,12 @@ namespace AuthorizationAPI.Migrations
                     b.Property<int>("AccessFailedCount")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("ClassId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ConcurrencyStamp")
                         .IsConcurrencyToken()
                         .HasColumnType("text");
-
-                    b.Property<string>("Discriminator")
-                        .IsRequired()
-                        .HasMaxLength(8)
-                        .HasColumnType("character varying(8)");
 
                     b.Property<string>("Email")
                         .HasMaxLength(256)
@@ -54,8 +52,7 @@ namespace AuthorizationAPI.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Name")
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
+                        .HasColumnType("text");
 
                     b.Property<string>("NormalizedEmail")
                         .HasMaxLength(256)
@@ -86,6 +83,8 @@ namespace AuthorizationAPI.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ClassId");
+
                     b.HasIndex("NormalizedEmail")
                         .HasDatabaseName("EmailIndex");
 
@@ -94,10 +93,6 @@ namespace AuthorizationAPI.Migrations
                         .HasDatabaseName("UserNameIndex");
 
                     b.ToTable("AspNetUsers", "auth");
-
-                    b.HasDiscriminator().HasValue("User");
-
-                    b.UseTphMappingStrategy();
                 });
 
             modelBuilder.Entity("Class", b =>
@@ -115,6 +110,7 @@ namespace AuthorizationAPI.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("TeacherId")
+                        .IsRequired()
                         .HasColumnType("text");
 
                     b.HasKey("Id");
@@ -256,32 +252,22 @@ namespace AuthorizationAPI.Migrations
                     b.ToTable("AspNetUserTokens", "auth");
                 });
 
-            modelBuilder.Entity("AuthorizationAPI.Database.Admin", b =>
+            modelBuilder.Entity("AuthorizationAPI.Database.User", b =>
                 {
-                    b.HasBaseType("AuthorizationAPI.Database.User");
+                    b.HasOne("Class", "Class")
+                        .WithMany("Students")
+                        .HasForeignKey("ClassId");
 
-                    b.HasDiscriminator().HasValue("Admin");
-                });
-
-            modelBuilder.Entity("AuthorizationAPI.Database.Student", b =>
-                {
-                    b.HasBaseType("AuthorizationAPI.Database.User");
-
-                    b.HasDiscriminator().HasValue("Student");
-                });
-
-            modelBuilder.Entity("AuthorizationAPI.Database.Teacher", b =>
-                {
-                    b.HasBaseType("AuthorizationAPI.Database.User");
-
-                    b.HasDiscriminator().HasValue("Teacher");
+                    b.Navigation("Class");
                 });
 
             modelBuilder.Entity("Class", b =>
                 {
-                    b.HasOne("AuthorizationAPI.Database.Teacher", "Teacher")
+                    b.HasOne("AuthorizationAPI.Database.User", "Teacher")
                         .WithMany()
-                        .HasForeignKey("TeacherId");
+                        .HasForeignKey("TeacherId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("Teacher");
                 });
@@ -335,6 +321,11 @@ namespace AuthorizationAPI.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Class", b =>
+                {
+                    b.Navigation("Students");
                 });
 #pragma warning restore 612, 618
         }
