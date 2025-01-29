@@ -123,18 +123,6 @@ using (var scope = app.Services.CreateScope())
         await dbContext.SaveChangesAsync();
     }
 }
-
-app.MapGet("/me", async (ClaimsPrincipal claims, AppDbContext context) =>
-{
-    var userId = claims.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
-    if (userId == null)
-    {
-        throw new ArgumentNullException(nameof(userId));
-    }
-    var user = await context.Users.FindAsync(userId);
-
-    return user;
-});
 var allowedRoles = new List<string> { "Admin", "Teacher", "Student" };
 using (var scope = app.Services.CreateScope())
 {
@@ -178,7 +166,7 @@ app.MapPost("/assign-role", async (string email, string role, UserManager<User> 
 })
 .RequireAuthorization("RequireAdminRole");
 
-//dd
+
 app.MapPost("/remove-role", async (string email, string role, UserManager<User> userManager, RoleManager<IdentityRole> roleManager) =>
 {
     if (!allowedRoles.Contains(role))
@@ -207,7 +195,7 @@ app.MapPost("/remove-role", async (string email, string role, UserManager<User> 
 })
 .RequireAuthorization("RequireAdminRole");
 
-app.MapPost("/classes", async (ClaimsPrincipal claims, AppDbContext context, string name, string description) =>
+app.MapPost("create/classes", async (ClaimsPrincipal claims, AppDbContext context, string name, string description) =>
 {
 
 
@@ -242,7 +230,7 @@ app.MapPost("/classes", async (ClaimsPrincipal claims, AppDbContext context, str
 
     return Results.Ok(newClass);
 })
-.RequireAuthorization("RequireTeacherRole");
+.RequireAuthorization(policy => policy.RequireRole("Teacher", "Admin"));
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -258,7 +246,11 @@ app.MapGet("users/me", async (ClaimsPrincipal claims, AppDbContext context, User
         return Results.BadRequest("User ID is not found in the claims.");
     }
 
-    var user = await context.Users.Include(u => u.Class).ThenInclude(c => c.Students).FirstOrDefaultAsync(u => u.Id == userId);
+    var user = await context.Users
+        .Include(u => u.Class)
+        .ThenInclude(c => c.Students)
+        .Include(u => u.Class.Teacher)
+        .FirstOrDefaultAsync(u => u.Id == userId);
 
     if (user == null)
     {
@@ -281,13 +273,14 @@ app.MapGet("users/me", async (ClaimsPrincipal claims, AppDbContext context, User
             user.Class.Id,
             user.Class.Name,
             user.Class.Description,
-            Students = user.Class.Students.Select(s => new { s.Id, s.UserName, s.Email })
+            Teacher = new { user.Class.Teacher.Id, user.Class.Teacher.UserName, user.Class.Teacher.Email }
         } : null
     };
 
     return Results.Ok(response);
 })
 .RequireAuthorization();
+
 
 app.MapPost("/classes/{className}/add-student", async (ClaimsPrincipal claims, string className, string studentEmail, AppDbContext context, UserManager<User> userManager) =>
 {
@@ -324,7 +317,10 @@ app.MapPost("/classes/{className}/add-student", async (ClaimsPrincipal claims, s
     {
         return Results.NotFound("Student not found");
     }
-
+    else if (classEntity.Students.Contains(student))
+    {
+        return Results.BadRequest("Student is already in the class");
+    }
     classEntity.Students.Add(student);
     await context.SaveChangesAsync();
 
@@ -360,7 +356,7 @@ app.MapDelete("/classes/{className}/remove-student", async (ClaimsPrincipal clai
     {
         return Results.NotFound("Class not found");
     }
-
+    
 
     var student = await userManager.FindByEmailAsync(studentEmail);
     if (student == null)
@@ -373,7 +369,7 @@ app.MapDelete("/classes/{className}/remove-student", async (ClaimsPrincipal clai
     {
         return Results.BadRequest("Student is not in the class");
     }
-
+    
     await context.SaveChangesAsync();
 
     return Results.Ok("Student removed from class successfully");
