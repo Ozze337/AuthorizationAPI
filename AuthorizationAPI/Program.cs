@@ -74,9 +74,7 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
-
 var app = builder.Build();
-
 
 app.MapIdentityApi<User>();
 using (var scope = app.Services.CreateScope())
@@ -290,6 +288,7 @@ app.MapGet("users/me", async (ClaimsPrincipal claims, AppDbContext context, User
     return Results.Ok(response);
 })
 .RequireAuthorization();
+
 app.MapPost("/classes/{className}/add-student", async (ClaimsPrincipal claims, string className, string studentEmail, AppDbContext context, UserManager<User> userManager) =>
 {
     // Retrieve the user ID from claims
@@ -333,16 +332,16 @@ app.MapPost("/classes/{className}/add-student", async (ClaimsPrincipal claims, s
 })
 .RequireAuthorization(policy => policy.RequireRole("Teacher", "Admin"));
 
-app.MapPost("/classes/{className}/remove-student", async (ClaimsPrincipal claims, string className, string studentEmail, AppDbContext context, UserManager<User> userManager) =>
+app.MapDelete("/classes/{className}/remove-student", async (ClaimsPrincipal claims, string className, string studentEmail, AppDbContext context, UserManager<User> userManager) =>
 {
-    
+
     var userId = claims.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
     if (string.IsNullOrEmpty(userId))
     {
         return Results.BadRequest("User ID is not found in the claims.");
     }
 
-    
+
     var user = await userManager.FindByIdAsync(userId);
     if (user == null)
     {
@@ -355,21 +354,21 @@ app.MapPost("/classes/{className}/remove-student", async (ClaimsPrincipal claims
         return Results.Forbid();
     }
 
-    
+
     var classEntity = await context.Classes.Include(c => c.Students).FirstOrDefaultAsync(c => c.Name == className);
     if (classEntity == null)
     {
         return Results.NotFound("Class not found");
     }
 
-    
+
     var student = await userManager.FindByEmailAsync(studentEmail);
     if (student == null)
     {
         return Results.NotFound("Student not found");
     }
 
-    
+
     if (!classEntity.Students.Remove(student))
     {
         return Results.BadRequest("Student is not in the class");
@@ -380,7 +379,6 @@ app.MapPost("/classes/{className}/remove-student", async (ClaimsPrincipal claims
     return Results.Ok("Student removed from class successfully");
 })
 .RequireAuthorization(policy => policy.RequireRole("Teacher", "Admin"));
-
 
 app.MapGet("manage/rolesAndClaims", (ClaimsPrincipal user) =>
 {
